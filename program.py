@@ -9,18 +9,19 @@ SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 SQL_LOC = os.path.join(SCRIPT_LOC, 'sec.sqlite')
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
 
+CIK_TABLE_NAME = 'cik'
+STOCKS_TABLE_NAME = 'stocks'
 
 parser = argparse.ArgumentParser()
+parser.add_argument('stock', type=str.upper, help='Stock symbol e.g. AAL, AAPL')
 parser.add_argument(
     '-s', "--startdate", metavar='Date', nargs='?',
-    type=lambda d: datetime.strptime(d, '%Y%m%d'),
-    default=datetime.datetime.now() + datetime.timedelta(-30),
+    default=(datetime.datetime.now() + datetime.timedelta(-30)).strft('%Y%m%d'),
     help="Choose a start date in format YYYY-MM-DD. Default is 30 days prior."
 )
 parser.add_argument(
     '-e', "--enddate", metavar='Date', nargs='?',
-    type=lambda d: datetime.strptime(d, '%Y%m%d'),
-    default=datetime.datetime.now(),
+    default=datetime.datetime.now().strft('%Y%m%d'),
     help="Choose a start date in format YYYY-MM-DD. Default is today."
 )
 parser.add_argument(
@@ -44,6 +45,23 @@ def does_table_exist(c, table_name):
     query = "SELECT name FROM sqlite_master"
     query += " WHERE type='table' AND name='{}';".format(table_name)
     c.execute(query)
+    return bool(c.fetchone())
+
+
+def does_data_exist(stock, startdate, enddate, c, columns):
+    if not does_table_exist(c, STOCKS_TABLE_NAME):
+        query = 'CREATE TABLE {0} (id integer PRIMARY KEY, {1});'
+        query = query.format(STOCKS_TABLE_NAME, ','.join(columns))
+        c.execute(query)
+    c.execute("Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME), (stock,))
+    row = c.fetchone()
+    query = """SELECT * FROM {} WHERE
+            trade_date >= date({})
+            AND trade_date <= date({})
+            AND cik = {}
+            """.format(STOCKS_TABLE_NAME, startdate, enddate)
+    t = (startdate, enddate, row['CIK'])
+    c.execute(query, t)
     return bool(c.fetchall())
 
 
@@ -62,12 +80,16 @@ def create_cik_table(c, table_name, cik_path):
         return c.lastrowid
 
 
+def query():
+    pass
+
 if __name__ == '__main__':
     user_args = parser.parse_args()
-    cik_table = 'cik'
     conn, c = connect(user_args.sql)
-    if not does_table_exist(c, cik_table):
-        create_cik_table(c, cik_table, user_args.cik)
+    if not does_table_exist(c, CIK_TABLE_NAME):
+        create_cik_table(c, CIK_TABLE_NAME, user_args.cik)
+    if not does_data_exist():
+        pass
     conn.close()
 
     "https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK=0000051143"
