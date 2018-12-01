@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 
 SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
-SQL_LOC = os.path.join(SCRIPT_LOC, 'sec.sqlite')
+SQL_LOC = os.path.join(SCRIPT_LOC, 'sec.db')
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
 
 CIK_TABLE_NAME = 'cik'
@@ -42,57 +42,40 @@ parser.add_argument(
 )
 
 
-def connect(sqlite_file):
-    """Make connection to an SQLite database file """
-    conn = sqlite3.connect(sqlite_file)
-    c = conn.cursor()
-    return conn, c
-
-
-def does_table_exist(c, table_name):
-    query = "SELECT name FROM sqlite_master"
-    query += " WHERE type='table' AND name='{}';".format(table_name)
-    c.execute(query)
-    return bool(c.fetchone())
-
-
-def does_data_exist(cik, startdate, enddate, c):
-    if not does_table_exist(c, STOCKS_TABLE_NAME):
-        query = 'CREATE TABLE {0} (id integer PRIMARY KEY, {1});'
-        query = query.format(STOCKS_TABLE_NAME, ','.join(STOCKS_TABLE_COLUMNS))
-        c.execute(query)
-    query = """SELECT * FROM {} WHERE
-            trade_date >= date({})
-            AND trade_date <= date({})
-            AND cik = {}
-            """.format(STOCKS_TABLE_NAME, startdate, enddate)
-    t = (startdate, enddate, cik)
-    c.execute(query, t)
-    return bool(c.fetchall())
-
-
-def create_cik_table(c, cik_path):
+def create_cik_table(c, conn, cik_path):
     with open(cik_path, 'r') as f:
         reader = csv.reader(f)
         columns = next(reader)[0].replace('|', ',')
         col_len = len(columns.split(','))
-        query = 'CREATE TABLE {0} (id integer PRIMARY KEY, {1});'
+        query = 'CREATE TABLE IF NOT EXISTS {} ({});'
         query = query.format(CIK_TABLE_NAME, columns)
         c.execute(query)
         for data in reader:
-            query = 'INSERT INTO {0} ({1}) VALUES ({2})'
+            query = 'INSERT INTO {} ({}) VALUES ({});'
             query = query.format(CIK_TABLE_NAME, columns, ','.join('?' * col_len))
-            print(query, data[0].split('|'))
             c.execute(query, data[0].split('|'))
-        return c.lastrowid
+            conn.commit()
 
 
-def insert_stock_data(trades):
-    query = 'INSERT INTO {0} ({1}) VALUES ({2})'
-    columns = ','.join(STOCKS_TABLE_COLUMNS)
-    col_len = len(STOCKS_TABLE_COLUMNS)
-    query = query.format(STOCKS_TABLE_NAME, columns, ','.join('?' * col_len))
-    cursor.executemany(query, trades)
+def create_stock_table(cik, startdate, enddate, c, conn):
+    query = 'CREATE TABLE IF NOT EXISTS {} ({});'
+    query = query.format(STOCKS_TABLE_NAME, ','.join(STOCKS_TABLE_COLUMNS))
+    c.execute(query)
+    query = (
+        'SELECT * FROM {} WHERE transaction_date >= date({})'
+        ' AND transaction_date <= date({}) AND cik = {}'
+        .format(STOCKS_TABLE_NAME, startdate, enddate, cik)
+    )
+    c.execute(query)
+    if not bool(c.fetchall()):
+        owners = query_owners(cik)
+        trades = query_transactions(cik, owners, startdate)
+        query = 'INSERT INTO {} ({}) VALUES ({})'
+        columns = ','.join(STOCKS_TABLE_COLUMNS)
+        col_len = len(STOCKS_TABLE_COLUMNS)
+        query = query.format(STOCKS_TABLE_NAME, columns, ','.join('?' * col_len))
+        c.executemany(query, trades)
+        conn.commit()
 
 
 def query(cik, page_num=0):
@@ -124,7 +107,7 @@ def query_owners(cik):
         owner = cells[0].find(text=True)
         position = cells[3].find(text=True)
         owners[owner] = position
-    return position
+    return owners
 
 
 def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
@@ -153,7 +136,7 @@ def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
                 owner_cik = cells[10].find(text=True)
                 if transaction_type == desired_trans_type:
                     trades.append((
-                        cik, transaction_date, owner, owners.get('owner', None),
+                        cik, transaction_date, owner, owners.get(owner, None),
                         transaction_type, num_transaction, num_owned, owner_cik
                     ))
                 last_transaction = datetime.strptime(transaction_date, '%Y-%m-%d')
@@ -163,22 +146,24 @@ def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
 
 if __name__ == '__main__':
     user_args = parser.parse_args()
-    conn, c = connect(user_args.sql)
-    if user_args.cik is None:
-        if not does_table_exist(c, CIK_TABLE_NAME):
-            create_cik_table(c, user_args.cikpath)
-        c.execute(
-            "Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME),
-            (user_args.stock,)
-        )
-        row = c.fetchone()
-        cik = row['CIK']
-    else:
+    conn = sqlite3.connect(user_args.sql)
+    c = conn.cursor()
+    if user_args.cik:
         cik = user_args.cik
-    if not does_data_exist(cik, user_args.startdate, user_args.enddate, c):
-        owners = query_owners(cik)
-        trades = query_transactions(cik, owners, user_args.startdate)
-        insert_stock_data(trades)
+    else:
+        try:
+            c.execute(
+                "Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME),
+                (user_args.stock,)
+            )
+        except sqlite3.OperationalError:
+            create_cik_table(c, conn, user_args.cikpath)
+            c.execute(
+                "Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME),
+                (user_args.stock,)
+            )
+        finally:
+            row = c.fetchone()
+            cik = row[0]
+    create_stock_table(cik, user_args.startdate, user_args.enddate, c, conn)
     conn.close()
-
-    "https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK=0000051143"
