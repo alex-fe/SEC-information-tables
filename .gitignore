@@ -1,4 +1,4 @@
 stock-data/
 readme.txt
-*/.sqlite
+*.sqlite
 cik.csv
