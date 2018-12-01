@@ -11,6 +11,8 @@ from bs4 import BeautifulSoup
 SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 SQL_LOC = os.path.join(SCRIPT_LOC, 'sec.db')
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
+HTML_LOC = os.path.join(SCRIPT_LOC, 'tables.html')
+DATE_STR = '%Y-%m-%d'
 
 CIK_TABLE_NAME = 'cik'
 STOCKS_TABLE_NAME = 'stocks'
@@ -24,12 +26,12 @@ parser.add_argument('stock', type=str.upper, help='Stock symbol e.g. AAL, AAPL')
 parser.add_argument('-c', '--cik', help="Company's CIK identifier")
 parser.add_argument(
     '-s', "--startdate", metavar='Date', nargs='?',
-    default=(datetime.now() + timedelta(-30)).strftime('%Y%m%d'),
+    default=(datetime.now() + timedelta(-30)).strftime(DATE_STR),
     help="Choose a start date in format YYYY-MM-DD. Default is 30 days prior."
 )
 parser.add_argument(
     '-e', "--enddate", metavar='Date', nargs='?',
-    default=datetime.now().strftime('%Y%m%d'),
+    default=datetime.now().strftime(DATE_STR),
     help="Choose a start date in format YYYY-MM-DD. Default is today."
 )
 parser.add_argument(
@@ -40,6 +42,7 @@ parser.add_argument(
     '--cikpath', metavar='Path', nargs='?', default=CIK_CSV_LOC,
     help="Path to cik.csv. Default location is {}".format(CIK_CSV_LOC)
 )
+parser.add_argument('--html', action='store_true', help='Return sql to html table.')
 
 
 def create_cik_table(c, conn, cik_path):
@@ -62,8 +65,8 @@ def create_stock_table(cik, startdate, enddate, c, conn):
     query = query.format(STOCKS_TABLE_NAME, ','.join(STOCKS_TABLE_COLUMNS))
     c.execute(query)
     query = (
-        'SELECT * FROM {} WHERE transaction_date >= date({})'
-        ' AND transaction_date <= date({}) AND cik = {}'
+        "SELECT * FROM {} WHERE transaction_date >=date('{}')"
+        " AND transaction_date<=('{}') AND cik='{}'"
         .format(STOCKS_TABLE_NAME, startdate, enddate, cik)
     )
     c.execute(query)
@@ -114,7 +117,7 @@ def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
     page_num = 0
     trades = []
     last_transaction = datetime.now()
-    startdate = datetime.strptime(startdate, '%Y%m%d')
+    startdate = datetime.strptime(startdate, DATE_STR)
     while True:
         page = query(cik, page_num)
         if page is None:
@@ -139,9 +142,24 @@ def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
                         cik, transaction_date, owner, owners.get(owner, None),
                         transaction_type, num_transaction, num_owned, owner_cik
                     ))
-                last_transaction = datetime.strptime(transaction_date, '%Y-%m-%d')
+                last_transaction = datetime.strptime(transaction_date, DATE_STR)
             if last_transaction <= startdate:
                 return trades
+
+
+def to_hmtl(c):
+    c.execute("SELECT * from {};".format(STOCKS_TABLE_NAME))
+    table = c.fetchall()
+    table_head = '\n'.join("<th>{}</th>".format(th) for th in STOCKS_TABLE_COLUMNS)
+    table_head = "<tr>{}</tr>".format(table_head)
+    table_body = ""
+    for row in table:
+        table_row = "<td>{}</td>".format('</td><td>'.join(row))
+        table_row = "<tr>{}</tr>".format(table_row)
+        table_body += table_row
+    message = "<table id='sec_table'>{}{}<table>".format(table_head, table_body)
+    with open(HTML_LOC, "w") as html_file:
+        html_file.write(message)
 
 
 if __name__ == '__main__':
@@ -166,4 +184,6 @@ if __name__ == '__main__':
             row = c.fetchone()
             cik = row[0]
     create_stock_table(cik, user_args.startdate, user_args.enddate, c, conn)
+    if user_args.html:
+        to_hmtl(c)
     conn.close()
