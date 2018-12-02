@@ -1,5 +1,5 @@
 stock-data/
-readme.txt
-*.db
-*.html
 cik.csv
+readme.txt
+*.pickle
+*.html
