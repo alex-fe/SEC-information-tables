@@ -9,6 +9,11 @@ $ pip install pandas
 ```
 
 ## Running
+The Behavior of the script is can be broken down into a few parts:
+1. First fetch the CIK data from the user parameters or from `cik.csv` 
+2. Search the pickled SEC DataFrame based on parameters (start date, end date, position). If unable to find the date, query the [SEC Edgar](https://www.sec.gov) site, adding the pulled data to the pickle.
+3. If specified to return an html table (`--html`) and data found in parameters, an `.html` is created.
+
 E.G for querying Forward Industries Inc
 ```
 $ python program.py FORD --html
