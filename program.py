@@ -1,84 +1,88 @@
 import argparse
-import csv
+import datetime
 import os
-import sqlite3
-from datetime import datetime, timedelta
+import sys
 from urllib.request import urlopen
 
+import pandas as pd
 from bs4 import BeautifulSoup
 
 
 SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
-SQL_LOC = os.path.join(SCRIPT_LOC, 'sec.db')
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
+PICKLE_LOC_1 = os.path.join(SCRIPT_LOC, 'cik_dataframe.pickle')
+PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pickle')
 HTML_LOC = os.path.join(SCRIPT_LOC, 'tables.html')
-DATE_STR = '%Y-%m-%d'
 
 CIK_TABLE_NAME = 'cik'
 STOCKS_TABLE_NAME = 'stocks'
-STOCKS_TABLE_COLUMNS = [
-    'cik', 'transaction_date', 'reporting_owner', 'position', 'transaction_type',
-    'securities_transacted', 'securities_owned', 'owner_cik',
+SHOW_COLUMNS = [
+    'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Transaction Type',
+    'Number of Securities Owned', 'Number of Securities Transacted', 'Line Number',
+    'Owner CIK',
 ]
+
+
+def valid_date(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        msg = "Not a valid date: '{0}'.".format(s)
+        raise argparse.ArgumentTypeError(msg)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('stock', type=str.upper, help='Stock symbol e.g. AAL, AAPL')
-parser.add_argument('-c', '--cik', help="Company's CIK identifier")
+parser.add_argument('-c', '--cik', type=str.strip, help="Company's CIK identifier")
+parser.add_argument('--html', action='store_true', help='Return sql to html table.')
+parser.add_argument('-p', '--position', help="Restrict search by position e.g. CEO")
 parser.add_argument(
-    '-s', "--startdate", metavar='Date', nargs='?',
-    default=(datetime.now() + timedelta(-30)).strftime(DATE_STR),
+    '-s', "--startdate", metavar='Date', nargs='?', type=valid_date,
+    default=datetime.datetime.now() + datetime.timedelta(-30),
     help="Choose a start date in format YYYY-MM-DD. Default is 30 days prior."
 )
 parser.add_argument(
-    '-e', "--enddate", metavar='Date', nargs='?',
-    default=datetime.now().strftime(DATE_STR),
+    '-e', "--enddate", metavar='Date', nargs='?', type=valid_date,
+    default=datetime.datetime.now(),
     help="Choose a start date in format YYYY-MM-DD. Default is today."
-)
-parser.add_argument(
-    '--sql', metavar='Path', nargs='?', default=SQL_LOC,
-    help="Path to sqlite database. Default is location is {}".format(SQL_LOC)
 )
 parser.add_argument(
     '--cikpath', metavar='Path', nargs='?', default=CIK_CSV_LOC,
     help="Path to cik.csv. Default location is {}".format(CIK_CSV_LOC)
 )
-parser.add_argument('--html', action='store_true', help='Return sql to html table.')
 
 
-def create_cik_table(c, conn, cik_path):
-    with open(cik_path, 'r') as f:
-        reader = csv.reader(f)
-        columns = next(reader)[0].replace('|', ',')
-        col_len = len(columns.split(','))
-        query = 'CREATE TABLE IF NOT EXISTS {} ({});'
-        query = query.format(CIK_TABLE_NAME, columns)
-        c.execute(query)
-        for data in reader:
-            query = 'INSERT INTO {} ({}) VALUES ({});'
-            query = query.format(CIK_TABLE_NAME, columns, ','.join('?' * col_len))
-            c.execute(query, data[0].split('|'))
-            conn.commit()
-
-
-def create_stock_table(cik, startdate, enddate, c, conn):
-    query = 'CREATE TABLE IF NOT EXISTS {} ({});'
-    query = query.format(STOCKS_TABLE_NAME, ','.join(STOCKS_TABLE_COLUMNS))
-    c.execute(query)
-    query = (
-        "SELECT * FROM {} WHERE transaction_date >=date('{}')"
-        " AND transaction_date<=('{}') AND cik='{}'"
-        .format(STOCKS_TABLE_NAME, startdate, enddate, cik)
-    )
-    c.execute(query)
-    if not bool(c.fetchall()):
+def create_stock_table(cik, startdate, enddate):
+    sec_df = None
+    if os.path.isfile(PICKLE_LOC_2):
+        sec_df = pd.read_pickle(PICKLE_LOC_2)
+        slice = sec_df.loc[
+            sec_df['cik'] == cik
+            & sec_df['Transaction Date'] >= startdate
+            & sec_df['Transaction Date'] <= enddate
+        ]
+    else:
+        slice = pd.Series()
+    if slice.empty:
         owners = query_owners(cik)
-        trades = query_transactions(cik, owners, startdate)
-        query = 'INSERT INTO {} ({}) VALUES ({})'
-        columns = ','.join(STOCKS_TABLE_COLUMNS)
-        col_len = len(STOCKS_TABLE_COLUMNS)
-        query = query.format(STOCKS_TABLE_NAME, columns, ','.join('?' * col_len))
-        c.executemany(query, trades)
-        conn.commit()
+        trades = query_transactions(cik, startdate)
+        trade_df = pd.concat(trades, sort=False, ignore_index=True)
+        trade_df['Position'] = trade_df.apply(
+            lambda row: owners.get(row['Reporting Owner'], None), axis=1
+        )
+        trade_df['CIK'] = cik
+        if sec_df is not None:
+            sec_df = sec_df.append(trade_df)
+        else:
+            sec_df = trade_df
+        sec_df.to_pickle(PICKLE_LOC_2)
+        return sec_df.loc[
+            sec_df['cik'] == cik
+            & sec_df['Transaction Date'] >= startdate
+            & sec_df['Transaction Date'] <= enddate
+        ]
+    else:
+        return slice
 
 
 def query(cik, page_num=0):
@@ -113,11 +117,10 @@ def query_owners(cik):
     return owners
 
 
-def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
+def query_transactions(cik, startdate, transaction_type='P-Purchase'):
     page_num = 0
     trades = []
-    last_transaction = datetime.now()
-    startdate = datetime.strptime(startdate, DATE_STR)
+    last_transaction = datetime.datetime.now()
     while True:
         page = query(cik, page_num)
         if page is None:
@@ -125,65 +128,37 @@ def query_transactions(cik, owners, startdate, desired_trans_type='P-Purchase'):
         else:
             page_num += 80
             soup = BeautifulSoup(page, 'html.parser')
-            transactions = soup.find('table', {'id': 'transaction-report'})
-            rows = transactions.find_all('tr')
-            for body, row in enumerate(rows):
-                if not body:
-                    continue
-                cells = row.find_all('td')
-                transaction_date = cells[1].find(text=True)
-                owner = cells[3].find(text=True)
-                transaction_type = cells[5].find(text=True)
-                num_transaction = cells[7].find(text=True)
-                num_owned = cells[8].find(text=True)
-                owner_cik = cells[10].find(text=True)
-                if transaction_type == desired_trans_type:
-                    trades.append((
-                        cik, transaction_date, owner, owners.get(owner, None),
-                        transaction_type, num_transaction, num_owned, owner_cik
-                    ))
-                last_transaction = datetime.strptime(transaction_date, DATE_STR)
+            trade_df = pd.read_html(
+                soup.prettify(), attrs={'id': 'transaction-report'}, header=0
+            )[0]
+            trade_df['Transaction Date'] = pd.to_datetime(
+                trade_df['Transaction Date']
+            )
+            last_transaction = min(trade_df['Transaction Date'])
+            tdf = trade_df[trade_df['Transaction Type'] == transaction_type]
+            trades.append(tdf)
             if last_transaction <= startdate:
                 return trades
 
 
-def to_hmtl(c):
-    c.execute("SELECT * from {};".format(STOCKS_TABLE_NAME))
-    table = c.fetchall()
-    table_head = '\n'.join("<th>{}</th>".format(th) for th in STOCKS_TABLE_COLUMNS)
-    table_head = "<tr>{}</tr>".format(table_head)
-    table_body = ""
-    for row in table:
-        table_row = "<td>{}</td>".format('</td><td>'.join(row))
-        table_row = "<tr>{}</tr>".format(table_row)
-        table_body += table_row
-    message = "<table id='sec_table'>{}{}<table>".format(table_head, table_body)
-    with open(HTML_LOC, "w") as html_file:
-        html_file.write(message)
-
-
 if __name__ == '__main__':
     user_args = parser.parse_args()
-    conn = sqlite3.connect(user_args.sql)
-    c = conn.cursor()
     if user_args.cik:
         cik = user_args.cik
     else:
-        try:
-            c.execute(
-                "Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME),
-                (user_args.stock,)
+        if os.path.isfile(PICKLE_LOC_1):
+            cik_df = pd.read_pickle(PICKLE_LOC_1)
+        else:
+            cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
+            cik_df.to_pickle(PICKLE_LOC_1)
+        slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
+        if slice.empty:
+            sys.exit(
+                'CIK not found with stock symbol: {}'.format(user_args.stock)
             )
-        except sqlite3.OperationalError:
-            create_cik_table(c, conn, user_args.cikpath)
-            c.execute(
-                "Select * FROM {} WHERE Ticker=?".format(CIK_TABLE_NAME),
-                (user_args.stock,)
-            )
-        finally:
-            row = c.fetchone()
-            cik = row[0]
-    create_stock_table(cik, user_args.startdate, user_args.enddate, c, conn)
+        cik = slice.values[0]
+    df = create_stock_table(cik, user_args.startdate, user_args.enddate)
     if user_args.html:
-        to_hmtl(c)
-    conn.close()
+        with open(HTML_LOC, "w") as html_file:
+            html = df.to_html(columns=SHOW_COLUMNS)
+            html_file.write(html)
