@@ -14,9 +14,7 @@ PICKLE_LOC_1 = os.path.join(SCRIPT_LOC, 'cik_dataframe.pickle')
 PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pickle')
 HTML_LOC = os.path.join(SCRIPT_LOC, 'tables.html')
 
-CIK_TABLE_NAME = 'cik'
-STOCKS_TABLE_NAME = 'stocks'
-SHOW_COLUMNS = [
+HTML_COLUMNS = [
     'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Transaction Type',
     'Number of Securities Owned', 'Number of Securities Transacted', 'Line Number',
     'Owner CIK',
@@ -52,18 +50,20 @@ parser.add_argument(
 )
 
 
-def create_stock_table(cik, startdate, enddate):
-    sec_df = None
+def create_stock_table(cik, startdate, enddate, position):
+    print('Getting SEC info')
     if os.path.isfile(PICKLE_LOC_2):
         sec_df = pd.read_pickle(PICKLE_LOC_2)
         slice = sec_df.loc[
-            sec_df['cik'] == cik
-            & sec_df['Transaction Date'] >= startdate
-            & sec_df['Transaction Date'] <= enddate
+            (sec_df['CIK'] == cik)
+            & (sec_df['Transaction Date'] >= startdate)
+            & (sec_df['Transaction Date'] <= enddate)
         ]
     else:
+        sec_df = None
         slice = pd.Series()
     if slice.empty:
+        print('SEC not found; Begin querying')
         owners = query_owners(cik)
         trades = query_transactions(cik, startdate)
         trade_df = pd.concat(trades, sort=False, ignore_index=True)
@@ -75,14 +75,17 @@ def create_stock_table(cik, startdate, enddate):
             sec_df = sec_df.append(trade_df)
         else:
             sec_df = trade_df
-        sec_df.to_pickle(PICKLE_LOC_2)
-        return sec_df.loc[
-            sec_df['cik'] == cik
-            & sec_df['Transaction Date'] >= startdate
-            & sec_df['Transaction Date'] <= enddate
-        ]
-    else:
-        return slice
+        sec_df.drop_duplicates(inplace=True)
+        # sec_df.to_pickle(PICKLE_LOC_2)
+    sec_df.reset_index(inplace=True)
+    slice = sec_df.loc[
+        (sec_df['CIK'] == cik)
+        & (sec_df['Transaction Date'] >= startdate)
+        & (sec_df['Transaction Date'] <= enddate)
+    ]
+    if position is not None and not slice.empty:
+        return slice.loc[slice['Position'].str.contains(position)]
+    return slice
 
 
 def query(cik, page_num=0):
@@ -90,7 +93,7 @@ def query(cik, page_num=0):
     url = url.format(cik)
     if page_num:
         url += '&type=&dateb=&owner=include&start=0'.format(page_num)
-    print('Page number: {}\n{}'.format(page_num, url))
+    print(url)
     try:
         page = urlopen(url)
     except Exception as e:
@@ -132,12 +135,12 @@ def query_transactions(cik, startdate, transaction_type='P-Purchase'):
                 soup.prettify(), attrs={'id': 'transaction-report'}, header=0
             )[0]
             trade_df['Transaction Date'] = pd.to_datetime(
-                trade_df['Transaction Date']
+                trade_df['Transaction Date'], format="%Y-%m-%d"
             )
             last_transaction = min(trade_df['Transaction Date'])
             tdf = trade_df[trade_df['Transaction Type'] == transaction_type]
             trades.append(tdf)
-            if last_transaction <= startdate:
+            if last_transaction < startdate:
                 return trades
 
 
@@ -146,6 +149,7 @@ if __name__ == '__main__':
     if user_args.cik:
         cik = user_args.cik
     else:
+        print('Getting CIK information')
         if os.path.isfile(PICKLE_LOC_1):
             cik_df = pd.read_pickle(PICKLE_LOC_1)
         else:
@@ -157,8 +161,14 @@ if __name__ == '__main__':
                 'CIK not found with stock symbol: {}'.format(user_args.stock)
             )
         cik = slice.values[0]
-    df = create_stock_table(cik, user_args.startdate, user_args.enddate)
+    df = create_stock_table(
+        cik, user_args.startdate, user_args.enddate, user_args.position
+    )
     if user_args.html:
-        with open(HTML_LOC, "w") as html_file:
-            html = df.to_html(columns=SHOW_COLUMNS)
-            html_file.write(html)
+        if df.empty:
+            sys.exit('No data matching parameters')
+        else:
+            print('Outputting html file: {}'.format(HTML_LOC))
+            with open(HTML_LOC, "w") as html_file:
+                html = df.to_html(columns=HTML_COLUMNS)
+                html_file.write(html)
