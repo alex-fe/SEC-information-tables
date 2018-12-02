@@ -75,9 +75,8 @@ def create_stock_table(cik, startdate, enddate, position):
             sec_df = sec_df.append(trade_df)
         else:
             sec_df = trade_df
-        sec_df.drop_duplicates(inplace=True)
-        # sec_df.to_pickle(PICKLE_LOC_2)
-    sec_df.reset_index(inplace=True)
+        sec_df.drop_duplicates().reset_index(inplace=True)
+        sec_df.to_pickle(PICKLE_LOC_2)
     slice = sec_df.loc[
         (sec_df['CIK'] == cik)
         & (sec_df['Transaction Date'] >= startdate)
@@ -145,11 +144,12 @@ def query_transactions(cik, startdate, transaction_type='P-Purchase'):
 
 
 if __name__ == '__main__':
+    sys.setrecursionlimit(1000000000)
     user_args = parser.parse_args()
     if user_args.cik:
         cik = user_args.cik
     else:
-        print('Getting CIK information')
+        print('Getting CIK info')
         if os.path.isfile(PICKLE_LOC_1):
             cik_df = pd.read_pickle(PICKLE_LOC_1)
         else:
