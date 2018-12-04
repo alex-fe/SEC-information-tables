@@ -38,8 +38,8 @@ parser.add_argument(
 )
 parser.add_argument(
     '-s', "--startdate", metavar='Date', nargs='?', type=valid_date,
-    default=datetime.datetime.now() + datetime.timedelta(-30),
-    help="Choose a start date in format YYYY-MM-DD. Default is 30 days prior."
+    default=datetime.datetime.now() - datetime.timedelta(days=365),
+    help="Choose a start date in format YYYY-MM-DD. Default is 1 year prior."
 )
 parser.add_argument(
     '-e', "--enddate", metavar='Date', nargs='?', type=valid_date,
@@ -53,6 +53,9 @@ parser.add_argument(
 parser.add_argument(
     '--transaction-type', default='P-Purchase', metavar='Transaction',
     help="Specify what transaction type to parse on. Default is 'P-Purchase'."
+)
+parser.add_argument(
+    '--flush', action='store_true', help='Delete preexisting pickle files.'
 )
 
 
@@ -87,7 +90,7 @@ def create_stock_table(cik, user_args):
         sec_df = None
         slice = pd.Series()
     if slice.empty:
-        print('SEC not found; Begin querying')
+        print('No matching data found; Begin querying')
         owners, trades = query_tables(cik, user_args)
         if not trades:
             return slice
@@ -121,7 +124,7 @@ def query(cik, page_num=0):
     url = 'https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK={}'
     url = url.format(cik)
     if page_num:
-        url += '&type=&dateb=&owner=include&start=0'.format(page_num)
+        url += '&type=&dateb=&owner=include&start={}'.format(page_num)
     print(url)
     try:
         page = urlopen(url)
@@ -160,7 +163,8 @@ def query_tables(cik, user_args):
     return owners, trades
 
 
-def query_transactions(cik, startdate, transaction_type, page_num=0):
+def query_transactions(cik, startdate, transaction_type):
+    page_num = 0
     trades = []
     last_transaction = datetime.datetime.now()
     while True:
@@ -190,6 +194,12 @@ def query_transactions(cik, startdate, transaction_type, page_num=0):
 if __name__ == '__main__':
     sys.setrecursionlimit(1000000000)
     user_args = parser.parse_args()
+    if user_args.flush:
+        for filename in (PICKLE_LOC_1, PICKLE_LOC_2):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
     cik = get_cik(user_args)
     print('Using CIK {}'.format(cik))
     df = create_stock_table(cik, user_args)
@@ -199,5 +209,6 @@ if __name__ == '__main__':
         else:
             print('Outputting html file: {}'.format(HTML_LOC))
             with open(HTML_LOC, "w") as html_file:
+                df['Reporting Owner'] = df['Reporting Owner'].str.title()
                 html = df.to_html(columns=HTML_COLUMNS)
                 html_file.write(html)
