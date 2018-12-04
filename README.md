@@ -2,15 +2,16 @@
 
 ## Requirements
 
-This script needs [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) and [Pandas](https://pandas.pydata.org/) to run
+This script needs [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/), [Pandas](https://pandas.pydata.org/), and [lxml](https://lxml.de/) to run
 ```
 $ pip install beautifulsoup4
 $ pip install pandas
+$ pip install lxml
 ```
 
 ## Running
 The Behavior of the script is can be broken down into a few parts:
-1. First fetch the CIK data from the user parameters or from `cik.csv` 
+1. First fetch the CIK data from the user parameters or from `cik.csv`
 2. Search the pickled SEC DataFrame based on parameters (start date, end date, position). If unable to find the date, query the [SEC Edgar](https://www.sec.gov) site, adding the pulled data to the pickle.
 3. If specified to return an html table (`--html`) and data found in parameters, an `.html` is created.
 

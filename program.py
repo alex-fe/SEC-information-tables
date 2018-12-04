@@ -48,9 +48,13 @@ parser.add_argument(
     '--cikpath', metavar='Path', nargs='?', default=CIK_CSV_LOC,
     help="Path to cik.csv. Default location is {}".format(CIK_CSV_LOC)
 )
+parser.add_argument(
+    '--transaction-type', default='P-Purchase', metavar='Transaction',
+    help="Specify what transaction type to parse on. Default is 'P-Purchase'."
+)
 
 
-def create_stock_table(cik, startdate, enddate, position):
+def create_stock_table(cik, startdate, enddate, position, transaction_type):
     print('Getting SEC info')
     if os.path.isfile(PICKLE_LOC_2):
         sec_df = pd.read_pickle(PICKLE_LOC_2)
@@ -65,7 +69,7 @@ def create_stock_table(cik, startdate, enddate, position):
     if slice.empty:
         print('SEC not found; Begin querying')
         owners = query_owners(cik)
-        trades = query_transactions(cik, startdate)
+        trades = query_transactions(cik, startdate, transaction_type)
         trade_df = pd.concat(trades, sort=False, ignore_index=True)
         trade_df['Position'] = trade_df.apply(
             lambda row: owners.get(row['Reporting Owner'], None), axis=1
@@ -119,7 +123,7 @@ def query_owners(cik):
     return owners
 
 
-def query_transactions(cik, startdate, transaction_type='P-Purchase'):
+def query_transactions(cik, startdate, transaction_type):
     page_num = 0
     trades = []
     last_transaction = datetime.datetime.now()
@@ -162,7 +166,8 @@ if __name__ == '__main__':
             )
         cik = slice.values[0]
     df = create_stock_table(
-        cik, user_args.startdate, user_args.enddate, user_args.position
+        cik, user_args.startdate, user_args.enddate, user_args.position,
+        user_args.transaction_type
     )
     if user_args.html:
         if df.empty:
