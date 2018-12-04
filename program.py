@@ -10,8 +10,8 @@ from bs4 import BeautifulSoup
 
 SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
-PICKLE_LOC_1 = os.path.join(SCRIPT_LOC, 'cik_dataframe.pickle')
-PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pickle')
+PICKLE_LOC_1 = os.path.join(SCRIPT_LOC, 'cik_dataframe.pkl')
+PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pkl')
 HTML_LOC = os.path.join(SCRIPT_LOC, 'tables.html')
 
 HTML_COLUMNS = [
