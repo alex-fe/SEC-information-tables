@@ -56,6 +56,24 @@ parser.add_argument(
 )
 
 
+def get_cik(user_args):
+    """Get CIK either from user or from csv."""
+    if user_args.cik:
+        return user_args.cik
+    else:
+        if os.path.isfile(PICKLE_LOC_1):
+            cik_df = pd.read_pickle(PICKLE_LOC_1)
+        else:
+            cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
+            cik_df.to_pickle(PICKLE_LOC_1)
+        slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
+        if slice.empty:
+            sys.exit(
+                'CIK not found with stock symbol: {}'.format(user_args.stock)
+            )
+        return slice.values[0]
+
+
 def create_stock_table(cik, user_args):
     if os.path.isfile(PICKLE_LOC_2):
         print('SEC pickle found')
@@ -71,6 +89,8 @@ def create_stock_table(cik, user_args):
     if slice.empty:
         print('SEC not found; Begin querying')
         owners, trades = query_tables(cik, user_args)
+        if not trades:
+            return slice
         trade_df = pd.concat(trades, sort=False, ignore_index=True)
         trade_df['Position'] = trade_df.apply(
             lambda row: owners.get(row['Reporting Owner'], None), axis=1
@@ -86,7 +106,6 @@ def create_stock_table(cik, user_args):
             .sort_values(by='Transaction Date')
             .reset_index(inplace=True)
         )
-        import pdb; pdb.set_trace()
         sec_df.to_pickle(PICKLE_LOC_2)
     slice = sec_df.loc[
         (sec_df['CIK'] == cik)
@@ -136,14 +155,12 @@ def query_tables(cik, user_args):
             )
             trades.extend(t)
     print("querying company's transactions")
-    t = query_transactions(
-        cik, user_args.startdate, user_args.transaction_type
-    )
+    t = query_transactions(cik, user_args.startdate, user_args.transaction_type)
     trades.extend(t)
     return owners, trades
 
 
-def query_transactions(cik, startdate, transaction_type, page=None, page_num=0):
+def query_transactions(cik, startdate, transaction_type, page_num=0):
     trades = []
     last_transaction = datetime.datetime.now()
     while True:
@@ -164,7 +181,8 @@ def query_transactions(cik, startdate, transaction_type, page=None, page_num=0):
             )
             last_transaction = min(trade_df['Transaction Date'])
             tdf = trade_df[trade_df['Transaction Type'] == transaction_type]
-            trades.append(tdf)
+            if not tdf.empty:
+                trades.append(tdf)
             if last_transaction < startdate:
                 return trades
 
@@ -172,20 +190,7 @@ def query_transactions(cik, startdate, transaction_type, page=None, page_num=0):
 if __name__ == '__main__':
     sys.setrecursionlimit(1000000000)
     user_args = parser.parse_args()
-    if user_args.cik:
-        cik = user_args.cik
-    else:
-        if os.path.isfile(PICKLE_LOC_1):
-            cik_df = pd.read_pickle(PICKLE_LOC_1)
-        else:
-            cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
-            cik_df.to_pickle(PICKLE_LOC_1)
-        slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
-        if slice.empty:
-            sys.exit(
-                'CIK not found with stock symbol: {}'.format(user_args.stock)
-            )
-        cik = slice.values[0]
+    cik = get_cik(user_args)
     print('Using CIK {}'.format(cik))
     df = create_stock_table(cik, user_args)
     if user_args.html:
