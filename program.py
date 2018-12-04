@@ -33,7 +33,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('stock', type=str.upper, help='Stock symbol e.g. AAL, AAPL')
 parser.add_argument('-c', '--cik', type=str.strip, help="Company's CIK identifier")
 parser.add_argument('--html', action='store_true', help='Return sql to html table.')
-parser.add_argument('-p', '--position', help="Restrict search by position e.g. CEO")
+parser.add_argument(
+    '-p', '--position', type=str.lower, help="Restrict search by position e.g. CEO"
+)
 parser.add_argument(
     '-s', "--startdate", metavar='Date', nargs='?', type=valid_date,
     default=datetime.datetime.now() + datetime.timedelta(-30),
@@ -54,22 +56,21 @@ parser.add_argument(
 )
 
 
-def create_stock_table(cik, startdate, enddate, position, transaction_type):
-    print('Getting SEC info')
+def create_stock_table(cik, user_args):
     if os.path.isfile(PICKLE_LOC_2):
+        print('SEC pickle found')
         sec_df = pd.read_pickle(PICKLE_LOC_2)
         slice = sec_df.loc[
             (sec_df['CIK'] == cik)
-            & (sec_df['Transaction Date'] >= startdate)
-            & (sec_df['Transaction Date'] <= enddate)
+            & (sec_df['Transaction Date'] >= user_args.startdate)
+            & (sec_df['Transaction Date'] <= user_args.enddate)
         ]
     else:
         sec_df = None
         slice = pd.Series()
     if slice.empty:
         print('SEC not found; Begin querying')
-        owners = query_owners(cik)
-        trades = query_transactions(cik, startdate, transaction_type)
+        owners, trades = query_tables(cik, user_args)
         trade_df = pd.concat(trades, sort=False, ignore_index=True)
         trade_df['Position'] = trade_df.apply(
             lambda row: owners.get(row['Reporting Owner'], None), axis=1
@@ -79,15 +80,21 @@ def create_stock_table(cik, startdate, enddate, position, transaction_type):
             sec_df = sec_df.append(trade_df)
         else:
             sec_df = trade_df
-        sec_df.drop_duplicates().reset_index(inplace=True)
+        (
+            sec_df
+            .drop_duplicates()
+            .sort_values(by='Transaction Date')
+            .reset_index(inplace=True)
+        )
+        import pdb; pdb.set_trace()
         sec_df.to_pickle(PICKLE_LOC_2)
     slice = sec_df.loc[
         (sec_df['CIK'] == cik)
-        & (sec_df['Transaction Date'] >= startdate)
-        & (sec_df['Transaction Date'] <= enddate)
+        & (sec_df['Transaction Date'] >= user_args.startdate)
+        & (sec_df['Transaction Date'] <= user_args.enddate)
     ]
-    if position is not None and not slice.empty:
-        return slice.loc[slice['Position'].str.contains(position)]
+    if user_args.position is not None and not slice.empty:
+        return slice.loc[slice['Position'].str.contains(user_args.position)]
     return slice
 
 
@@ -105,7 +112,7 @@ def query(cik, page_num=0):
         return page
 
 
-def query_owners(cik):
+def query_tables(cik, user_args):
     page = query(cik)
     soup = BeautifulSoup(page, 'html.parser')
     owners_table = soup.find(
@@ -113,18 +120,30 @@ def query_owners(cik):
     )
     rows = owners_table.find_all('tr')
     owners = {}
+    trades = []
+    print('Querying owners: ')
     for body, row in enumerate(rows):
         if not body:
             continue
         cells = row.find_all('td')
         owner = cells[0].find(text=True)
+        filling = cells[1].find(text=True)
         position = cells[3].find(text=True)
         owners[owner] = position
-    return owners
+        if user_args.position is None or user_args.position in position.lower():
+            t = query_transactions(
+                filling, user_args.startdate, user_args.transaction_type
+            )
+            trades.extend(t)
+    print("querying company's transactions")
+    t = query_transactions(
+        cik, user_args.startdate, user_args.transaction_type
+    )
+    trades.extend(t)
+    return owners, trades
 
 
-def query_transactions(cik, startdate, transaction_type):
-    page_num = 0
+def query_transactions(cik, startdate, transaction_type, page=None, page_num=0):
     trades = []
     last_transaction = datetime.datetime.now()
     while True:
@@ -134,9 +153,12 @@ def query_transactions(cik, startdate, transaction_type):
         else:
             page_num += 80
             soup = BeautifulSoup(page, 'html.parser')
-            trade_df = pd.read_html(
-                soup.prettify(), attrs={'id': 'transaction-report'}, header=0
-            )[0]
+            # Check if table is present
+            table_attrs = {'id': 'transaction-report'}
+            table = soup.find('table', attrs=table_attrs)
+            if table is None or len(table.select('tr')) == 1:
+                return trades
+            trade_df = pd.read_html(soup.prettify(), attrs=table_attrs, header=0)[0]
             trade_df['Transaction Date'] = pd.to_datetime(
                 trade_df['Transaction Date'], format="%Y-%m-%d"
             )
@@ -153,7 +175,6 @@ if __name__ == '__main__':
     if user_args.cik:
         cik = user_args.cik
     else:
-        print('Getting CIK info')
         if os.path.isfile(PICKLE_LOC_1):
             cik_df = pd.read_pickle(PICKLE_LOC_1)
         else:
@@ -165,10 +186,8 @@ if __name__ == '__main__':
                 'CIK not found with stock symbol: {}'.format(user_args.stock)
             )
         cik = slice.values[0]
-    df = create_stock_table(
-        cik, user_args.startdate, user_args.enddate, user_args.position,
-        user_args.transaction_type
-    )
+    print('Using CIK {}'.format(cik))
+    df = create_stock_table(cik, user_args)
     if user_args.html:
         if df.empty:
             sys.exit('No data matching parameters')
