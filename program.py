@@ -17,7 +17,7 @@ HTML_LOC = os.path.join(SCRIPT_LOC, 'html', '{}_tables.html')
 HTML_COLUMNS = [
     'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Issuer',
     'Transaction Type', 'Number of Securities Owned',
-    'Number of Securities Transacted', 'Owner CIK', 'Issuer CIK'
+    'Number of Securities Transacted', 'Line Number', 'Owner CIK', 'Issuer CIK'
 
 ]
 
@@ -33,7 +33,7 @@ def valid_date(s):
 parser = argparse.ArgumentParser()
 parser.add_argument('stock', type=str.upper, help='Stock symbol e.g. AAL, AAPL')
 parser.add_argument('-c', '--cik', type=str.strip, help="Company's CIK identifier")
-parser.add_argument('--html', action='store_true', help='Return sql to html table.')
+parser.add_argument('--html', action='store_true', help='Create html table.')
 parser.add_argument(
     '-p', '--position', type=str.lower, help="Restrict search by position e.g. CEO"
 )
@@ -95,7 +95,7 @@ def create_stock_table(cik, user_args):
         owners, trades = query_tables(cik, user_args)
         if not trades:
             return slice
-        trade_df = pd.concat(trades, sort=False, ignore_index=True)
+        trade_df = pd.concat(trades, sort=True, ignore_index=True)
         trade_df['Position'] = trade_df.apply(
             lambda row: owners.get(row['Reporting Owner'], None), axis=1
         )
@@ -104,12 +104,10 @@ def create_stock_table(cik, user_args):
             sec_df = sec_df.append(trade_df)
         else:
             sec_df = trade_df
-        (
-            sec_df
-            .drop_duplicates()
-            .sort_values(by='Transaction Date')
-            .reset_index(inplace=True)
-        )
+        sec_df.drop_duplicates(inplace=True)
+        sec_df.sort_values(by='Transaction Date', ascending=False, inplace=True)
+        sec_df.reset_index(inplace=True)
+
         sec_df.to_pickle(PICKLE_LOC_2)
     slice = sec_df.loc[
         (sec_df['CIK'] == cik)
@@ -117,8 +115,18 @@ def create_stock_table(cik, user_args):
         & (sec_df['Transaction Date'] <= user_args.enddate)
     ]
     if user_args.position is not None and not slice.empty:
-        return slice.loc[slice['Position'].str.contains(user_args.position)]
-    return slice
+        slice = slice.loc[slice['Position'].str.contains(user_args.position)]
+    return (
+        slice
+        .sort_values(by='Transaction Date', ascending=False)
+        .drop_duplicates(
+            subset=[
+                'Transaction Date', 'Reporting Owner', 'Position',
+                'Number of Securities Owned', 'Number of Securities Transacted',
+                'Line Number'
+            ]
+        )
+    )
 
 
 def query(cik, get_type, page_num=0):
@@ -165,6 +173,9 @@ def query_tables(cik, user_args):
     t = query_transactions(
         cik, user_args.startdate, user_args.transaction_type, 'issuer'
     )
+    for df in t:
+        if 'Reporting Owner' not in df.columns:
+            df['Reporting Owner'] = owner
     trades.extend(t)
     return owners, trades
 
@@ -213,8 +224,9 @@ if __name__ == '__main__':
         if df.empty:
             sys.exit('No data matching parameters')
         else:
-            print('Outputting html file: {}'.format(HTML_LOC))
-            with open(HTML_LOC.format(cik), "w") as html_file:
+            file_loc = HTML_LOC.format(user_args.stock)
+            print('Outputting html file: {}'.format(file_loc))
+            with open(file_loc, "w") as html_file:
                 df['Reporting Owner'] = df['Reporting Owner'].str.title()
                 html = df.to_html(columns=HTML_COLUMNS, index=False)
                 html_file.write(html)
