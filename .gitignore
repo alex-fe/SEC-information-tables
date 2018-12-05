@@ -2,4 +2,4 @@ stock-data/
 readme.txt
 *.pickle
 *.pkl
-*.html
+html/
