@@ -15,9 +15,10 @@ PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pkl')
 HTML_LOC = os.path.join(SCRIPT_LOC, 'html', '{}_tables.html')
 
 HTML_COLUMNS = [
-    'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Transaction Type',
-    'Number of Securities Owned', 'Number of Securities Transacted', 'Line Number',
-    'Owner CIK',
+    'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Issuer',
+    'Transaction Type', 'Number of Securities Owned',
+    'Number of Securities Transacted', 'Owner CIK', 'Issuer CIK'
+
 ]
 
 
@@ -120,9 +121,9 @@ def create_stock_table(cik, user_args):
     return slice
 
 
-def query(cik, page_num=0):
-    url = 'https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK={}'
-    url = url.format(cik)
+def query(cik, get_type, page_num=0):
+    url = 'https://www.sec.gov/cgi-bin/own-disp?action=get{}&CIK={}'
+    url = url.format(get_type, cik)
     if page_num:
         url += '&type=&dateb=&owner=include&start={}'.format(page_num)
     print(url)
@@ -135,7 +136,7 @@ def query(cik, page_num=0):
 
 
 def query_tables(cik, user_args):
-    page = query(cik)
+    page = query(cik, 'issuer')
     soup = BeautifulSoup(page, 'html.parser')
     owners_table = soup.find(
         'table', {'border': 1, 'cellspacing': 0, 'cellpadding': 3}
@@ -154,21 +155,26 @@ def query_tables(cik, user_args):
         owners[owner] = position
         if user_args.position is None or user_args.position in position.lower():
             t = query_transactions(
-                filling, user_args.startdate, user_args.transaction_type
+                filling, user_args.startdate, user_args.transaction_type, 'owner'
             )
+            for df in t:
+                if 'Reporting Owner' not in df.columns:
+                    df['Reporting Owner'] = owner
             trades.extend(t)
     print("querying company's transactions")
-    t = query_transactions(cik, user_args.startdate, user_args.transaction_type)
+    t = query_transactions(
+        cik, user_args.startdate, user_args.transaction_type, 'issuer'
+    )
     trades.extend(t)
     return owners, trades
 
 
-def query_transactions(cik, startdate, transaction_type):
+def query_transactions(cik, startdate, transaction_type, get_type):
     page_num = 0
     trades = []
     last_transaction = datetime.datetime.now()
     while True:
-        page = query(cik, page_num)
+        page = query(cik, get_type, page_num)
         if page is None:
             return trades
         else:
@@ -181,13 +187,13 @@ def query_transactions(cik, startdate, transaction_type):
                 return trades
             trade_df = pd.read_html(soup.prettify(), attrs=table_attrs, header=0)[0]
             trade_df['Transaction Date'] = pd.to_datetime(
-                trade_df['Transaction Date'], format="%Y-%m-%d"
+                trade_df['Transaction Date'], format="%Y-%m-%d", errors='coerce'
             )
             last_transaction = min(trade_df['Transaction Date'])
             tdf = trade_df[trade_df['Transaction Type'] == transaction_type]
             if not tdf.empty:
                 trades.append(tdf)
-            if last_transaction < startdate:
+            if pd.isnull(last_transaction) or last_transaction < startdate:
                 return trades
 
 
