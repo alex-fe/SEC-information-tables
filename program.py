@@ -56,9 +56,6 @@ parser.add_argument(
     '--transaction-type', default='P-Purchase', metavar='Transaction',
     help="Specify what transaction type to parse on. Default is 'P-Purchase'."
 )
-parser.add_argument(
-    '--flush', action='store_true', help='Delete preexisting pickle files.'
-)
 
 
 def get_cik(user_args):
@@ -66,11 +63,7 @@ def get_cik(user_args):
     if user_args.cik:
         return user_args.cik
     else:
-        if os.path.isfile(PICKLE_LOC_1):
-            cik_df = pd.read_pickle(PICKLE_LOC_1)
-        else:
-            cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
-            cik_df.to_pickle(PICKLE_LOC_1)
+        cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
         slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
         if slice.empty:
             sys.exit(
@@ -80,40 +73,24 @@ def get_cik(user_args):
 
 
 def create_stock_table(cik, user_args):
-    if os.path.isfile(PICKLE_LOC_2):
-        print('SEC pickle found')
-        sec_df = pd.read_pickle(PICKLE_LOC_2)
-        slice = sec_df.loc[
-            (sec_df['CIK'] == cik)
-            & (sec_df['Transaction Date'] >= user_args.startdate)
-            & (sec_df['Transaction Date'] <= user_args.enddate)
-        ]
-    else:
-        sec_df = None
-        slice = pd.Series()
-    if slice.empty:
-        print('No matching data found; Begin querying')
-        owners, trades = query_tables(cik, user_args)
-        if not trades:
-            return slice
-        trade_df = pd.concat(trades, sort=True, ignore_index=True)
-        trade_df['Position'] = trade_df.apply(
-            lambda row: owners.get(row['Reporting Owner'], None), axis=1
-        )
-        trade_df['CIK'] = cik
-        if sec_df is not None:
-            sec_df = sec_df.append(trade_df)
-        else:
-            sec_df = trade_df
-        sec_df.drop_duplicates(inplace=True)
-        sec_df.sort_values(by='Transaction Date', ascending=False, inplace=True)
-        sec_df.reset_index(inplace=True)
-
-        sec_df.to_pickle(PICKLE_LOC_2)
-    slice = sec_df.loc[
-        (sec_df['CIK'] == cik)
-        & (sec_df['Transaction Date'] >= user_args.startdate)
-        & (sec_df['Transaction Date'] <= user_args.enddate)
+    print('Begin querying')
+    owners, trades = query_tables(cik, user_args)
+    if not trades:
+        return slice
+    trade_df = pd.concat(trades, sort=True, ignore_index=True, axis=0)
+    trade_df['Position'] = trade_df.apply(
+        lambda row: owners.get(row['Reporting Owner'], None), axis=1
+    )
+    trade_df['CIK'] = cik
+    trade_df.drop_duplicates(inplace=True)
+    trade_df.sort_values(by='Transaction Date', ascending=False, inplace=True)
+    if 'index' in trade_df.columns:
+        trade_df.drop('index', axis=1, inplace=True)
+    trade_df.reset_index(inplace=True)
+    slice = trade_df.loc[
+        (trade_df['CIK'] == cik)
+        & (trade_df['Transaction Date'] >= user_args.startdate)
+        & (trade_df['Transaction Date'] <= user_args.enddate)
     ]
     if user_args.position is not None and not slice.empty:
         slice = slice.loc[
@@ -214,12 +191,6 @@ def query_transactions(cik, startdate, transaction_type, get_type):
 if __name__ == '__main__':
     sys.setrecursionlimit(1000000000)
     user_args = parser.parse_args()
-    if user_args.flush:
-        for filename in (PICKLE_LOC_1, PICKLE_LOC_2):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
     cik = get_cik(user_args)
     print('Using CIK {}'.format(cik))
     df = create_stock_table(cik, user_args)
