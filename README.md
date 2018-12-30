@@ -11,8 +11,8 @@ $ pip install lxml
 
 ## Running
 The Behavior of the script is can be broken down into a few parts:
-1. First fetch the CIK data from the user parameters or from `cik.csv`. If getting from `cik.csv`, pickle the dataframe for faster future queries.
-2. Search the pickled SEC DataFrame based on parameters (cik, start date, end date, position) for `P-Purchase` transactions. If unable to find the data based on parameters, query the [SEC Edgar](https://www.sec.gov) site, adding the pulled data to the pickle.
+1. First fetch the CIK data from the user parameters or from `cik.csv`.
+2. Query the [SEC Edgar](https://www.sec.gov) site based on parameters. Default parameters are `P-Purchase` transactions within previous year.
 3. Return an html table (`--html`) with data found in parameters, an `.html` is created. If no data is found, message indicating situation is printed.
 4. Headers can be dynamically sorted. More info about that [here](https://mottie.github.io/tablesorter/docs/)
 
@@ -35,7 +35,7 @@ positional arguments:
   optional arguments:
     -h, --help            show this help message and exit
     -c CIK, --cik CIK     Company's CIK identifier
-    --html                Return sql to html table.
+    --html                Return data to html table.
     -p POSITION, --position POSITION
                           Restrict search by position e.g. CEO
     -s [Date], --startdate [Date]
@@ -49,5 +49,4 @@ positional arguments:
     --transaction-type Transaction
                           Specify what transaction type to parse on. Default is
                           'P-Purchase'.
-    --flush               Delete preexisting pickle files.
   ```
