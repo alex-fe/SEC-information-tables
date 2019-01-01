@@ -231,5 +231,27 @@ if __name__ == '__main__':
             print('Outputting html file: {}'.format(file_loc))
             with open(file_loc, "w") as html_file:
                 df['Reporting Owner'] = df['Reporting Owner'].str.title()
-                html = df.to_html(columns=HTML_COLUMNS, index=False)
+                df.fillna('-', inplace=True)
+                html = df.to_html(
+                    columns=HTML_COLUMNS, index=False, classes="tablesorter",
+                    table_id='sec-table'
+                )
+                header = '''
+                <html>
+                    <head>
+                        <link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/smoothness/jquery-ui.css">
+                        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+                        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.9.1/jquery.tablesorter.min.js"></script>
+                    </head>
+                '''
+                footer = '''
+                <script>
+                        $(document).ready(function () {
+                            $("#sec-table").tablesorter();
+                        });
+                    </script>
+                </html>
+                '''
+                html_file.write(header)
                 html_file.write(html)
+                html_file.write(footer)
