@@ -12,7 +12,8 @@ SCRIPT_LOC = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 CIK_CSV_LOC = os.path.join(SCRIPT_LOC, 'cik.csv')
 PICKLE_LOC_1 = os.path.join(SCRIPT_LOC, 'cik_dataframe.pkl')
 PICKLE_LOC_2 = os.path.join(SCRIPT_LOC, 'sec_dataframe.pkl')
-HTML_LOC = os.path.join(SCRIPT_LOC, 'html', '{}_tables.html')
+HTML_LOC = os.path.join(SCRIPT_LOC, 'html')
+HTML_FILE_LOC = os.path.join(SCRIPT_LOC, 'html', '{}_tables.html')
 
 HTML_COLUMNS = [
     'CIK', 'Transaction Date', 'Reporting Owner', 'Position', 'Issuer',
@@ -224,7 +225,9 @@ if __name__ == '__main__':
         if df.empty:
             sys.exit('No data matching parameters')
         else:
-            file_loc = HTML_LOC.format(user_args.stock)
+            if not os.path.exists(HTML_LOC):
+                os.mkdir(HTML_LOC)
+            file_loc = HTML_FILE_LOC.format(user_args.stock)
             print('Outputting html file: {}'.format(file_loc))
             with open(file_loc, "w") as html_file:
                 df['Reporting Owner'] = df['Reporting Owner'].str.title()
