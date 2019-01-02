@@ -233,13 +233,13 @@ if __name__ == '__main__':
                 df['Reporting Owner'] = df['Reporting Owner'].str.title()
                 df.fillna('-', inplace=True)
                 html = df.to_html(
-                    columns=HTML_COLUMNS, index=False, classes="tablesorter",
+                    columns=HTML_COLUMNS, index=False, classes="tablesorter-blue",
                     table_id='sec-table'
                 )
                 header = '''
                 <html>
                     <head>
-                        <link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/smoothness/jquery-ui.css">
+                        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.1/css/theme.blue.css">
                         <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
                         <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.9.1/jquery.tablesorter.min.js"></script>
                     </head>
