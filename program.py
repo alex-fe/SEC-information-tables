@@ -63,13 +63,17 @@ def get_cik(user_args):
     if user_args.cik:
         return user_args.cik
     else:
-        cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
-        slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
-        if slice.empty:
-            sys.exit(
-                'CIK not found with stock symbol: {}'.format(user_args.stock)
-            )
-        return slice.values[0]
+        try:
+            cik_df = pd.read_csv(user_args.cikpath, sep='|', dtype={'CIK': str})
+        except FileNotFoundError as e:
+            raise SystemExit('Incorrect path to cik.csv')
+        else:
+            slice = cik_df.loc[cik_df['Ticker'] == user_args.stock, 'CIK']
+            if slice.empty:
+                sys.exit(
+                    'CIK not found with stock symbol: {}'.format(user_args.stock)
+                )
+            return slice.values[0]
 
 
 def create_stock_table(cik, user_args):
