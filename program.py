@@ -116,7 +116,9 @@ def create_stock_table(cik, user_args):
         & (sec_df['Transaction Date'] <= user_args.enddate)
     ]
     if user_args.position is not None and not slice.empty:
-        slice = slice.loc[slice['Position'].str.contains(user_args.position)]
+        slice = slice.loc[
+            slice['Position'].str.lower().str.contains(user_args.position)
+        ]
     return (
         slice
         .sort_values(by='Transaction Date', ascending=False)
